@@ -34,11 +34,11 @@ const emit = defineEmits<{ (e: 'close'): void }>();
           <div class="title">Author</div>
           <div class="author-grid">
             <div class="k">Name</div>
-            <div class="v">Your Name</div>
+            <div class="v">Livis Snack</div>
             <div class="k">Email</div>
-            <div class="v"><a href="mailto:you@example.com">you@example.com</a></div>
+            <div class="v"><a href="mailto:brucesnack@outlook.com">brucesnack@outlook.com</a></div>
             <div class="k">GitHub</div>
-            <div class="v"><a href="https://github.com/yourname" target="_blank" rel="noopener noreferrer">https://github.com/yourname</a></div>
+            <div class="v"><a href="https://github.com/livissnack" target="_blank" rel="noopener noreferrer">https://github.com/livissnack</a></div>
           </div>
         </div>
         <div class="block">

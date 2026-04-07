@@ -1151,6 +1151,10 @@ const appendLog = (message: string) => {
   terminalLogs.value = [...terminalLogs.value.slice(-120), message];
 };
 
+const toggleWebviewDevtools = () => {
+  void invoke('plugin:webview|internal_toggle_devtools').catch(() => {});
+};
+
 const openWorkspaceAt = async (selected: string) => {
   const nodes = await invoke<TreeNode[]>('list_dir', { path: selected });
   workspacePath.value = selected;
@@ -2323,6 +2327,10 @@ const handleMenuAction = async (action: string) => {
     showHelpAbout.value = true;
     return;
   }
+  if (action === 'help-toggle-devtools') {
+    toggleWebviewDevtools();
+    return;
+  }
   if (action === 'help-shortcuts') {
     showHelpShortcuts.value = true;
     return;
@@ -2785,6 +2793,12 @@ const isInsideProjectTree = (target: EventTarget | null) => {
 };
 
 const onWindowKeydown = (event: KeyboardEvent) => {
+  if (matchesShortcut(event, 'Ctrl+Shift+D')) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleWebviewDevtools();
+    return;
+  }
   if (isInputLikeTarget(event.target)) {
     const allowInInput = globalKeybindings.some((binding) =>
       (binding.command === 'menu.go-next-tab' || binding.command === 'menu.go-prev-tab')

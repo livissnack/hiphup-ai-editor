@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { getTreeShortcut } from '../../config/treeShortcuts';
+import { formatShortcutForDisplay } from '../../utils/shortcutDisplay';
 
 type TreeNode = {
   name: string;
@@ -241,18 +242,18 @@ onBeforeUnmount(() => {
       :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       @pointerdown.stop
     >
-      <button class="ctx-item" @click="triggerAction('new-file')"><span>New File</span><span class="shortcut">{{ getTreeShortcut('new-file') }}</span></button>
+      <button class="ctx-item" @click="triggerAction('new-file')"><span>New File</span><span class="shortcut">{{ formatShortcutForDisplay(getTreeShortcut('new-file')) }}</span></button>
       <button class="ctx-item" @click="triggerAction('new-folder')"><span>New Folder</span></button>
-      <button class="ctx-item" @click="triggerAction('rename')"><span>Rename</span><span class="shortcut">{{ getTreeShortcut('rename') }}</span></button>
+      <button class="ctx-item" @click="triggerAction('rename')"><span>Rename</span><span class="shortcut">{{ formatShortcutForDisplay(getTreeShortcut('rename')) }}</span></button>
       <button class="ctx-item" @click="triggerAction('change-type')"><span>Change File Type</span></button>
       <div class="ctx-sep" />
       <button class="ctx-item" @click="triggerAction('open-file-dir')"><span>Open Current File Directory</span></button>
       <button class="ctx-item" @click="triggerAction('open-folder-dir')"><span>Open Current Folder</span></button>
       <div class="ctx-sep" />
-      <button class="ctx-item" @click="triggerAction('copy')"><span>Copy</span><span class="shortcut">{{ getTreeShortcut('copy') }}</span></button>
-      <button class="ctx-item" @click="triggerAction('cut')"><span>Cut</span><span class="shortcut">{{ getTreeShortcut('cut') }}</span></button>
-      <button class="ctx-item" @click="triggerAction('paste')"><span>Paste</span><span class="shortcut">{{ getTreeShortcut('paste') }}</span></button>
-      <button class="ctx-item" @click="triggerAction('copy-path')"><span>Copy Path</span><span class="shortcut">{{ getTreeShortcut('copy-path') }}</span></button>
+      <button class="ctx-item" @click="triggerAction('copy')"><span>Copy</span><span class="shortcut">{{ formatShortcutForDisplay(getTreeShortcut('copy')) }}</span></button>
+      <button class="ctx-item" @click="triggerAction('cut')"><span>Cut</span><span class="shortcut">{{ formatShortcutForDisplay(getTreeShortcut('cut')) }}</span></button>
+      <button class="ctx-item" @click="triggerAction('paste')"><span>Paste</span><span class="shortcut">{{ formatShortcutForDisplay(getTreeShortcut('paste')) }}</span></button>
+      <button class="ctx-item" @click="triggerAction('copy-path')"><span>Copy Path</span><span class="shortcut">{{ formatShortcutForDisplay(getTreeShortcut('copy-path')) }}</span></button>
       <div v-if="showGitSubmenu" class="ctx-sep" />
       <div
         v-if="showGitSubmenu"
@@ -290,9 +291,9 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="ctx-sep" />
-      <button class="ctx-item" @click="triggerAction('format')"><span>Format Code</span><span class="shortcut">{{ getTreeShortcut('format') }}</span></button>
-      <button class="ctx-item" @click="triggerAction('bookmark')"><span>Toggle Bookmark</span><span class="shortcut">{{ getTreeShortcut('bookmark') }}</span></button>
-      <button class="ctx-item danger" @click="triggerAction('delete')"><span>Delete</span><span class="shortcut">{{ getTreeShortcut('delete') }}</span></button>
+      <button class="ctx-item" @click="triggerAction('format')"><span>Format Code</span><span class="shortcut">{{ formatShortcutForDisplay(getTreeShortcut('format')) }}</span></button>
+      <button class="ctx-item" @click="triggerAction('bookmark')"><span>Toggle Bookmark</span><span class="shortcut">{{ formatShortcutForDisplay(getTreeShortcut('bookmark')) }}</span></button>
+      <button class="ctx-item danger" @click="triggerAction('delete')"><span>Delete</span><span class="shortcut">{{ formatShortcutForDisplay(getTreeShortcut('delete')) }}</span></button>
     </div>
   </div>
 </template>

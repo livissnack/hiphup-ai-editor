@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { formatShortcutForDisplay } from '../../utils/shortcutDisplay';
 
 type ShortcutItem = {
   category: string;
@@ -55,7 +56,7 @@ const grouped = computed(() => {
             <div v-for="item in items" :key="`${category}-${item.key}-${item.action}`" class="row">
               <div class="action">{{ item.action }}</div>
               <div class="desc">{{ item.description }}</div>
-              <div class="key">{{ item.key }}</div>
+              <div class="key">{{ formatShortcutForDisplay(item.key) }}</div>
             </div>
           </section>
         </template>

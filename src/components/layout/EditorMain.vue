@@ -10,6 +10,7 @@ import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
 import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
+import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 
 // 设置全局 Worker 加载逻辑
 self.MonacoEnvironment = {
@@ -24,9 +25,7 @@ self.MonacoEnvironment = {
       return new htmlWorker();
     }
     if (label === 'typescript' || label === 'javascript') {
-      // Use the base editor worker for TS/JS to keep production bundle memory usage low.
-      // This avoids pulling in the heavy TS language worker during packaging.
-      return new editorWorker();
+      return new tsWorker();
     }
     return new editorWorker();
   }

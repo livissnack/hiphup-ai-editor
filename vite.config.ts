@@ -16,6 +16,28 @@ export default defineConfig(async () => ({
     cssMinify: isCI ? false : "esbuild",
     sourcemap: false,
     reportCompressedSize: false,
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+
+          // Heavy editor/runtime chunks.
+          if (id.includes("monaco-editor")) return "vendor-monaco";
+          if (id.includes("@xterm")) return "vendor-xterm";
+
+          // Tauri bridge and UI runtime.
+          if (id.includes("@tauri-apps")) return "vendor-tauri";
+          if (id.includes("/vue/")) return "vendor-vue";
+
+          // Markdown / sanitize pipeline.
+          if (id.includes("marked") || id.includes("dompurify")) return "vendor-markdown";
+
+          // Keep remaining deps together.
+          return "vendor";
+        },
+      },
+    },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

@@ -101,6 +101,7 @@ const terminalItems: MenuItem[] = [
 ];
 const helpItems: MenuItem[] = [
   { label: 'About AI Editor', action: 'help-about' },
+  { label: 'Developer Tools', action: 'help-toggle-devtools', shortcut: 'Ctrl+Shift+D' },
   { label: 'Keyboard Shortcuts', action: 'help-shortcuts' },
   { separator: true, label: '-' },
   { label: "Install 'ai-editor' CLI (PATH)", action: 'help-install-cli' },

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { menuMap, menuOrder, type FullMenuKey } from '../../config/menuConfig';
+import { formatShortcutForDisplay } from '../../utils/shortcutDisplay';
 
 const appWindow = getCurrentWindow();
 const props = withDefaults(defineProps<{
@@ -107,7 +108,7 @@ onBeforeUnmount(() => {
               @click="onMenuItemClick(item.action)"
             >
               <span>{{ item.label }}</span>
-              <span v-if="item.shortcut" class="shortcut">{{ item.shortcut }}</span>
+              <span v-if="item.shortcut" class="shortcut">{{ formatShortcutForDisplay(item.shortcut) }}</span>
               <span v-else-if="item.children?.length" class="shortcut">▶</span>
             </button>
             <div
@@ -125,7 +126,7 @@ onBeforeUnmount(() => {
                   @click="onMenuItemClick(child.action)"
                 >
                   <span>{{ child.label }}</span>
-                  <span v-if="child.shortcut" class="shortcut">{{ child.shortcut }}</span>
+                  <span v-if="child.shortcut" class="shortcut">{{ formatShortcutForDisplay(child.shortcut) }}</span>
                 </button>
               </template>
             </div>
