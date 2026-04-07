@@ -42,8 +42,8 @@ jobs:
         run: |
           deno cache --lock=deno.lock --node-modules-dir --reload --allow-scripts=npm:@parcel/watcher npm:vue-tsc npm:vite npm:@tauri-apps/cli
 
-      - name: verify frontend build
-        run: deno task build
+      - name: verify types only
+        run: deno run --v8-flags=--max-old-space-size=4096 -A npm:vue-tsc --noEmit
 
       # 🚀 构建 Tauri 软件
       - name: build tauri app

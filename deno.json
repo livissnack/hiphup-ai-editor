@@ -2,7 +2,7 @@
   "nodeModulesDir": "auto",
   "tasks": {
     "dev": "deno run -A npm:vite",
-    "build": "deno run -A npm:vue-tsc --noEmit && deno run -A npm:vite build",
+    "build": "deno run --v8-flags=--max-old-space-size=8192 -A npm:vue-tsc --noEmit && deno run --v8-flags=--max-old-space-size=8192 -A npm:vite build",
     "preview": "deno run -A npm:vite preview",
     "tauri": "deno run -A npm:@tauri-apps/cli"
   },
