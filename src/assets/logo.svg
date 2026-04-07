@@ -1,0 +1,20 @@
+<!-- logo.svg -->
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient id="hiphup-bg" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#42A5F5"/>
+            <stop offset="1" stop-color="#1976D2"/>
+        </linearGradient>
+    </defs>
+    <rect width="120" height="120" rx="24" fill="url(#hiphup-bg)"/>
+    <!-- 左侧竖线 -->
+    <path d="M40 35 L30 60 L40 85" stroke="white" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- 右侧竖线 -->
+    <path d="M80 35 L90 60 L80 85" stroke="white" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- 上横线 -->
+    <line x1="45" y1="40" x2="75" y2="40" stroke="white" stroke-width="10" stroke-linecap="round"/>
+    <!-- 下横线 -->
+    <line x1="45" y1="80" x2="75" y2="80" stroke="white" stroke-width="10" stroke-linecap="round"/>
+    <!-- 中竖线 -->
+    <line x1="60" y1="40" x2="60" y2="80" stroke="white" stroke-width="10" stroke-linecap="round"/>
+</svg>

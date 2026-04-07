@@ -1,0 +1,53 @@
+name: "Publish Release"
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, windows-latest] # 删除了 ubuntu 减少报错，如需要可加回
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # 🚀 独立步骤：统一获取 Tag 的说明文字
+      - name: get tag message
+        id: tag_info
+        shell: bash
+        run: |
+          # 提取 tag 的第一行说明
+          MSG=$(git tag -l --format='%(contents:subject)' ${{ github.ref_name }})
+          echo "tag_msg=$MSG" >> $GITHUB_OUTPUT
+
+      - name: install frontend dependencies
+        run: deno install
+
+      # 🚀 构建 Tauri 软件
+      - name: build tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Hiphup-Ai-Editor ${{ github.ref_name }}: ${{ steps.tag_info.outputs.tag_msg }}"
+          releaseDraft: true
+          prerelease: false
+          includeRelease: true

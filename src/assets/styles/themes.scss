@@ -1,0 +1,86 @@
+/*
+  Theme tokens (CSS variables).
+  Keep component code using ONLY --ide-* variables.
+*/
+
+:root {
+  /* Default: JetBrains New UI Dark-like */
+  --ide-bg-main: #2b2d30;
+  --ide-bg-editor: #1e1f22;
+  --ide-bg-elevated: #2f3136;
+  --ide-border: #393b40;
+  --ide-text: #bcbec4;
+  --ide-text-muted: #70727a;
+  --ide-accent: #3574f0;
+  --ide-hover: #2e3035;
+  --ide-scrollbar-thumb: #4f535b;
+  --ide-scrollbar-thumb-hover: #6a6f79;
+  --ide-scrollbar-track: transparent;
+
+  /* Project tree — Git (WebStorm/Cursor-like) */
+  --ide-git-ignored: #6e7179;
+  --ide-git-untracked: #6aab73;
+  --ide-git-modified: #cf8e6d;
+  --ide-git-staged: #56a8f5;
+  --ide-git-mixed: #c77cdb;
+  --ide-git-conflict: #e66a6a;
+  --ide-git-ancestor: #8b90a0;
+
+  /* Sizing */
+  --ide-titlebar-height: 35px;
+  --ide-statusbar-height: 24px;
+  --ide-tabs-height: 34px;
+  --ide-sidebar-width: 34px;
+  --ide-project-width: 260px;
+  --ide-toolwindow-width: 320px;
+  --ide-bottom-height: 220px;
+
+  /* Radii */
+  --ide-radius-sm: 4px;
+}
+
+[data-theme="light"] {
+  /* IntelliJ Light-like */
+  --ide-bg-main: #f7f8fa;
+  --ide-bg-editor: #ffffff;
+  --ide-bg-elevated: #ffffff;
+  --ide-border: #d1d4d9;
+  --ide-text: #080808;
+  --ide-text-muted: #6b6f76;
+  --ide-accent: #3574f0;
+  --ide-hover: #edf0f5;
+  --ide-scrollbar-thumb: #bec4ce;
+  --ide-scrollbar-thumb-hover: #a6afbb;
+  --ide-scrollbar-track: transparent;
+
+  --ide-git-ignored: #9aa0a8;
+  --ide-git-untracked: #2f7d32;
+  --ide-git-modified: #b86200;
+  --ide-git-staged: #1565c0;
+  --ide-git-mixed: #7b1fa2;
+  --ide-git-conflict: #c62828;
+  --ide-git-ancestor: #5c6370;
+}
+
+[data-theme="monaco"] {
+  /* VS Code Dark+ / Monaco-like */
+  --ide-bg-main: #252526;
+  --ide-bg-editor: #1e1e1e;
+  --ide-bg-elevated: #2d2d2d;
+  --ide-border: #333333;
+  --ide-text: #cccccc;
+  --ide-text-muted: #8b8b8b;
+  --ide-accent: #007acc;
+  --ide-hover: #2a2d2e;
+  --ide-scrollbar-thumb: #4c4c4c;
+  --ide-scrollbar-thumb-hover: #636363;
+  --ide-scrollbar-track: transparent;
+
+  --ide-git-ignored: #848484;
+  --ide-git-untracked: #89d185;
+  --ide-git-modified: #e8c56c;
+  --ide-git-staged: #3794ff;
+  --ide-git-mixed: #c586c0;
+  --ide-git-conflict: #f14c4c;
+  --ide-git-ancestor: #858585;
+}

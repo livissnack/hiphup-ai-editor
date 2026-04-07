@@ -1,0 +1,11 @@
+{
+    "$schema": "../gen/schemas/opener-schema.json",
+    "identifier": "opener",
+    "description": "Opener plugin capability",
+    "windows": ["main"],
+    "permissions": [
+      "opener:default",
+      "opener:allow-open-url",
+      "opener:allow-reveal-item-in-dir"
+    ]
+}

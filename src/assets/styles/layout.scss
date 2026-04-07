@@ -1,0 +1,319 @@
+/*
+  WebStorm-like layout primitives
+  - App uses .ide-shell with header/body/footer
+  - .ide-body-main: 3-column grid (left | workspace | right). AI ToolWindow is position:absolute on .ide-body, not in the grid.
+  - Bottom panel sits under center (and can span, if desired)
+*/
+
+.ide-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--ide-bg-main);
+  color: var(--ide-text);
+  overflow: hidden;
+}
+
+.ide-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.ide-body-main {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns:
+    var(--ide-sidebar-width)
+    minmax(0, 1fr)
+    var(--ide-sidebar-width);
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.ide-body-main > aside.sidebar-icons.left {
+  grid-column: 1;
+}
+
+.ide-body-main > .ide-workspace {
+  grid-column: 2;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ide-workspace > .project-tree,
+.ide-workspace > .ide-left-panel {
+  flex: 0 0 var(--ide-project-width);
+  width: var(--ide-project-width);
+  max-width: var(--ide-project-width);
+  min-width: 0;
+}
+
+.ide-workspace > .ide-splitter.ide-splitter--vertical.ide-splitter-project {
+  flex: 0 0 var(--ide-project-splitter-width);
+  width: var(--ide-project-splitter-width);
+  min-width: 0;
+}
+
+.ide-workspace > .ide-center {
+  flex: 1 1 0%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ide-body-main > aside.sidebar-icons.right {
+  grid-column: 3;
+}
+
+/* AI panel + resize strip: overlay on top of workspace (do not consume grid width) */
+.ide-body > .ide-splitter-toolwindow-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--ide-sidebar-width) + var(--ide-toolwindow-width));
+  width: var(--ide-toolwindow-splitter-width);
+  z-index: 26;
+}
+
+.ide-body > .tool-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: var(--ide-sidebar-width);
+  width: var(--ide-toolwindow-width);
+  z-index: 25;
+  min-width: 0;
+}
+
+.ide-center {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  background: var(--ide-bg-editor);
+  border-left: 1px solid var(--ide-border);
+  border-right: 1px solid var(--ide-border);
+  position: relative;
+  z-index: 1;
+}
+
+.ide-center__main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 1;
+}
+
+.editor-groups {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.editor-groups.split {
+  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+}
+
+.editor-group {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.editor-group-splitter {
+  width: 1px;
+  background: var(--ide-border);
+}
+
+.ide-bottom {
+  height: var(--ide-bottom-height);
+  background: var(--ide-bg-main);
+  border-top: 1px solid var(--ide-border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ide-bottom[hidden] {
+  display: none !important;
+}
+
+.ide-bottom-wide {
+  position: relative;
+  z-index: 15;
+  width: calc(100% + var(--ide-project-width) + var(--ide-project-splitter-width));
+  margin-left: calc(-1 * (var(--ide-project-width) + var(--ide-project-splitter-width)));
+}
+
+.ide-panel-header {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--ide-border);
+  background: var(--ide-bg-main);
+}
+
+.ide-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ide-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.ide-panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+  font-size: 12px;
+  color: var(--ide-text);
+}
+
+.ide-scrollbar,
+.ide-panel-content {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ide-scrollbar-thumb) var(--ide-scrollbar-track);
+}
+
+.ide-scrollbar::-webkit-scrollbar,
+.ide-panel-content::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.ide-scrollbar::-webkit-scrollbar-track,
+.ide-panel-content::-webkit-scrollbar-track {
+  background: var(--ide-scrollbar-track);
+}
+
+.ide-scrollbar::-webkit-scrollbar-thumb,
+.ide-panel-content::-webkit-scrollbar-thumb {
+  background: var(--ide-scrollbar-thumb);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 10px;
+  min-height: 28px;
+}
+
+.ide-scrollbar::-webkit-scrollbar-thumb:hover,
+.ide-panel-content::-webkit-scrollbar-thumb:hover {
+  background: var(--ide-scrollbar-thumb-hover);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.ide-scrollbar::-webkit-scrollbar-corner,
+.ide-panel-content::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Generic interactive styles */
+.ide-btn {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--ide-radius-sm);
+  background: transparent;
+  color: var(--ide-text-muted);
+  cursor: pointer;
+}
+
+.ide-btn:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text);
+}
+
+.ide-btn--primary {
+  background: var(--ide-accent);
+  color: #fff;
+}
+
+.ide-btn--primary:hover {
+  filter: brightness(1.05);
+}
+
+.ide-splitter {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  z-index: 1;
+}
+
+.ide-splitter--vertical {
+  cursor: col-resize;
+}
+
+.ide-splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 1px;
+  width: 1px;
+  background: var(--ide-border);
+}
+
+.ide-splitter:hover::before {
+  background: var(--ide-accent);
+}
+
+.ide-left-panel {
+  width: var(--ide-project-width);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ide-bg-main);
+  border-right: 1px solid var(--ide-border);
+}
+
+.ide-search-input {
+  width: 100%;
+  height: 30px;
+  border: 1px solid var(--ide-border);
+  background: var(--ide-bg-elevated);
+  color: var(--ide-text);
+  border-radius: 6px;
+  padding: 0 10px;
+  margin-bottom: 10px;
+}
+
+.ide-list-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: color-mix(in srgb, var(--ide-bg-elevated) 55%, transparent);
+  cursor: pointer;
+}
+
+.ide-list-item:hover {
+  background: var(--ide-hover);
+}
+
+.muted {
+  color: var(--ide-text-muted);
+  font-size: 11px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
