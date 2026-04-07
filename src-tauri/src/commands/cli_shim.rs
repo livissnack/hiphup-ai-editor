@@ -54,6 +54,7 @@ pub fn take_cli_launch_paths(state: State<CliLaunchState>) -> Option<Vec<CliOpen
     state.0.lock().ok()?.take()
 }
 
+#[cfg(windows)]
 fn write_windows_shim(exe: &Path, cli_dir: &Path) -> Result<PathBuf, String> {
     std::fs::create_dir_all(cli_dir).map_err(|e| e.to_string())?;
     let cmd_path = cli_dir.join("ai-editor.cmd");
