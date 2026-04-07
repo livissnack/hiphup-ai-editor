@@ -7,6 +7,8 @@ on:
 
 jobs:
   publish-tauri:
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
     permissions:
       contents: write
     strategy:
@@ -38,14 +40,14 @@ jobs:
 
       - name: cache and install deno npm deps
         run: |
-          deno cache --lock=deno.lock --node-modules-dir --reload npm:vue-tsc npm:vite npm:@tauri-apps/cli
+          deno cache --lock=deno.lock --node-modules-dir --reload --allow-scripts=npm:@parcel/watcher npm:vue-tsc npm:vite npm:@tauri-apps/cli
 
       - name: verify frontend build
         run: deno task build
 
       # 🚀 构建 Tauri 软件
       - name: build tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.5.14
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
