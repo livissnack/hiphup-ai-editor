@@ -36,8 +36,12 @@ jobs:
           MSG=$(git tag -l --format='%(contents:subject)' ${{ github.ref_name }})
           echo "tag_msg=$MSG" >> $GITHUB_OUTPUT
 
-      - name: install frontend dependencies
-        run: deno install
+      - name: cache and install deno npm deps
+        run: |
+          deno cache --lock=deno.lock --node-modules-dir --reload npm:vue-tsc npm:vite npm:@tauri-apps/cli
+
+      - name: verify frontend build
+        run: deno task build
 
       # 🚀 构建 Tauri 软件
       - name: build tauri app
@@ -46,6 +50,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
+          tauriScript: deno task tauri
           tagName: ${{ github.ref_name }}
           releaseName: "Hiphup-Ai-Editor ${{ github.ref_name }}: ${{ steps.tag_info.outputs.tag_msg }}"
           releaseDraft: true
