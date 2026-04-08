@@ -58,6 +58,7 @@ pub fn run() {
             ai::aihub_chat,
             ai::aihub_chat_stream,
             ai::aihub_connection_status,
+            ai::openrouter_list_models,
             cli_shim::take_cli_launch_paths,
             cli_shim::install_cli_in_path
         ])

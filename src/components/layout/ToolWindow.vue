@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import twemoji from 'twemoji';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import UiSelect from '../ui/UiSelect.vue';
 
 const props = defineProps<{
   title: string;
@@ -13,7 +14,7 @@ const props = defineProps<{
 const emit = defineEmits(['close']);
 
 type ChatRole = 'user' | 'assistant' | 'system';
-type ChatMessage = { role: ChatRole; content: string; imageUrl?: string };
+type ChatMessage = { role: ChatRole; content: string; imageUrl?: string; audioUrl?: string };
 type PersistedChatMessage = { role: ChatRole; content: string };
 type ChatSession = {
   id: string;
@@ -35,7 +36,21 @@ type ExportedChatState = {
   activeSessionId: string;
   sessions: ChatSession[];
 };
-type ModelOptionItem = { id: string; isFree: boolean; supportsImage: boolean };
+type ModelOptionItem = { id: string; isFree: boolean; supportsImage: boolean; supportsAudio: boolean };
+type OpenRouterModelItem = {
+  id: string;
+  isFree: boolean;
+  supportsImage: boolean;
+  supportsAudio: boolean;
+  inputModalities: string[];
+  outputModalities: string[];
+};
+type AiSourceItem = {
+  id: string;
+  name: string;
+  modelsUrl: string;
+  chatBaseUrl: string;
+};
 type PendingCodeRef = {
   id: string;
   path: string;
@@ -63,10 +78,17 @@ const messages = ref<ChatMessage[]>([
 ]);
 const input = ref('');
 const loading = ref(false);
+const thinkingPaused = ref(false);
+const pausedStreamBuffer = ref('');
 const autoContext = ref(true);
 const model = ref('gpt-4o-mini');
 const apiBaseUrl = ref('https://aihubmix.com/v1');
 const apiKey = ref('');
+const apiKeyVisible = ref(false);
+const sources = ref<AiSourceItem[]>([]);
+const activeSourceId = ref('openrouter');
+const sourceDraft = ref<AiSourceItem>({ id: '', name: '', modelsUrl: '', chatBaseUrl: '' });
+const editingSourceId = ref('');
 const showSettings = ref(false);
 const chatScrollRef = ref<HTMLElement | null>(null);
 const modelOptions = ref<ModelOptionItem[]>([]);
@@ -74,11 +96,19 @@ const modelLoading = ref(false);
 const modelLoadError = ref('');
 const pendingImageDataUrl = ref('');
 const pendingImageName = ref('');
+const pendingAudioDataUrl = ref('');
+const pendingAudioName = ref('');
 const pendingCodeRefs = ref<PendingCodeRef[]>([]);
 const previewCodeRefId = ref('');
 const failedRequest = ref<FailedRequestSnapshot | null>(null);
 const streamingAssistantMessage = ref<ChatMessage | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const audioInputRef = ref<HTMLInputElement | null>(null);
+const isRecordingAudio = ref(false);
+let mediaRecorder: MediaRecorder | null = null;
+let mediaStream: MediaStream | null = null;
+let mediaChunks: BlobPart[] = [];
+const MIN_AUDIO_DURATION_SECONDS = 1;
 const importSessionsInputRef = ref<HTMLInputElement | null>(null);
 const modelSearch = ref('');
 const modelSearchInputRef = ref<HTMLInputElement | null>(null);
@@ -103,11 +133,17 @@ const modelSupportsImage = computed(() => {
   const current = modelOptions.value.find((m) => m.id === model.value);
   return !!current?.supportsImage;
 });
+const modelSupportsAudio = computed(() => {
+  const current = modelOptions.value.find((m) => m.id === model.value);
+  return !!current?.supportsAudio;
+});
 const filteredModelOptions = computed(() => {
   const keyword = modelSearch.value.trim().toLowerCase();
   if (!keyword) return modelOptions.value;
   return modelOptions.value.filter((m) => m.id.toLowerCase().includes(keyword));
 });
+const activeSource = computed(() => sources.value.find((s) => s.id === activeSourceId.value) || null);
+const sourceSelectOptions = computed(() => sources.value.map((s) => ({ value: s.id, label: s.name })));
 const sortedSessions = computed(() => [...chatSessions.value].sort((a, b) => b.updatedAt - a.updatedAt));
 const filteredSessions = computed(() => {
   const key = sessionSearch.value.trim().toLowerCase();
@@ -153,6 +189,8 @@ const applySessionToView = (session: ChatSession) => {
   input.value = session.draftInput || '';
   pendingImageDataUrl.value = '';
   pendingImageName.value = '';
+  pendingAudioDataUrl.value = '';
+  pendingAudioName.value = '';
   pendingCodeRefs.value = [];
   previewCodeRefId.value = '';
   failedRequest.value = null;
@@ -183,10 +221,41 @@ const syncActiveSessionFromView = () => {
 
 const loadAiConfig = async () => {
   try {
-    const config = await invoke<{ baseUrl: string; apiKey: string; model: string }>('load_ai_config');
+    const config = await invoke<{
+      baseUrl: string;
+      apiKey: string;
+      model: string;
+      activeSourceId?: string;
+      sources?: AiSourceItem[];
+    }>('load_ai_config');
     if (config?.baseUrl) apiBaseUrl.value = config.baseUrl;
     if (typeof config?.apiKey === 'string') apiKey.value = config.apiKey;
     if (typeof config?.model === 'string' && config.model.trim()) model.value = config.model.trim();
+    if (Array.isArray(config?.sources) && config.sources.length) {
+      sources.value = config.sources
+        .map((s) => ({
+          id: String(s.id || '').trim(),
+          name: String(s.name || '').trim(),
+          modelsUrl: String(s.modelsUrl || '').trim(),
+          chatBaseUrl: String(s.chatBaseUrl || '').trim(),
+        }))
+        .filter((s) => s.id && s.name && s.modelsUrl && s.chatBaseUrl);
+    }
+    if (!sources.value.length) {
+      sources.value = [
+        {
+          id: 'openrouter',
+          name: 'OpenRouter',
+          modelsUrl: 'https://openrouter.ai/api/v1/models?output_modalities=all',
+          chatBaseUrl: 'https://openrouter.ai/api/v1',
+        },
+      ];
+    }
+    if (config?.activeSourceId && sources.value.some((s) => s.id === config.activeSourceId)) {
+      activeSourceId.value = config.activeSourceId;
+    } else {
+      activeSourceId.value = sources.value[0].id;
+    }
   } catch {
     // Keep defaults if backend state is not available.
   } finally {
@@ -282,42 +351,84 @@ const scheduleSaveAiConfig = () => {
         baseUrl: apiBaseUrl.value.trim() || 'https://aihubmix.com/v1',
         apiKey: apiKey.value.trim(),
         model: model.value.trim() || 'gpt-4o-mini',
+        activeSourceId: activeSourceId.value,
+        sources: sources.value,
       },
     });
     saveAiConfigTimer = null;
   }, 220);
 };
 
+const applyActiveSource = (id: string) => {
+  const src = sources.value.find((s) => s.id === id);
+  if (!src) return;
+  activeSourceId.value = src.id;
+  apiBaseUrl.value = src.chatBaseUrl;
+  void loadModelOptions();
+};
+
+const startEditSource = (source?: AiSourceItem) => {
+  if (source) {
+    editingSourceId.value = source.id;
+    sourceDraft.value = { ...source };
+    return;
+  }
+  editingSourceId.value = '';
+  sourceDraft.value = {
+    id: `source-${Date.now()}`,
+    name: '',
+    modelsUrl: '',
+    chatBaseUrl: '',
+  };
+};
+
+const saveSourceDraft = () => {
+  const next = {
+    id: sourceDraft.value.id.trim() || `source-${Date.now()}`,
+    name: sourceDraft.value.name.trim(),
+    modelsUrl: sourceDraft.value.modelsUrl.trim(),
+    chatBaseUrl: sourceDraft.value.chatBaseUrl.trim(),
+  };
+  if (!next.name || !next.modelsUrl || !next.chatBaseUrl) return;
+  const idx = sources.value.findIndex((s) => s.id === editingSourceId.value);
+  if (idx >= 0) {
+    sources.value[idx] = next;
+  } else {
+    if (sources.value.some((s) => s.id === next.id)) next.id = `${next.id}-${Math.random().toString(36).slice(2, 5)}`;
+    sources.value = [...sources.value, next];
+  }
+  if (!sources.value.some((s) => s.id === activeSourceId.value)) activeSourceId.value = next.id;
+  if (activeSourceId.value === next.id) apiBaseUrl.value = next.chatBaseUrl;
+  editingSourceId.value = '';
+  sourceDraft.value = { id: '', name: '', modelsUrl: '', chatBaseUrl: '' };
+  scheduleSaveAiConfig();
+};
+
+const removeSource = (id: string) => {
+  if (sources.value.length <= 1) return;
+  sources.value = sources.value.filter((s) => s.id !== id);
+  if (activeSourceId.value === id) {
+    const first = sources.value[0];
+    if (first) applyActiveSource(first.id);
+  }
+  scheduleSaveAiConfig();
+};
+
 const loadModelOptions = async () => {
   modelLoading.value = true;
   modelLoadError.value = '';
   try {
-    const response = await fetch('https://aihubmix.com/api/v1/models');
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    const ids = Array.isArray(data?.data)
-      ? data.data
-          .map((item: any) => String(item?.model_id || '').trim())
-          .filter((v: string) => !!v)
-      : [];
-    const itemMap = new Map<string, ModelOptionItem>();
-    if (Array.isArray(data?.data)) {
-      for (const item of data.data) {
-        const id = String(item?.model_id || '').trim();
-        if (!id) continue;
-        const modalities = String(item?.input_modalities || '').toLowerCase();
-        const supportsImage = modalities
-          .split(',')
-          .map((s: string) => s.trim())
-          .includes('image');
-        itemMap.set(id, { id, isFree: /-free$/i.test(id), supportsImage });
-      }
-    }
-    modelOptions.value = Array.from(itemMap.values())
-      .sort((a, b) => {
-        if (a.isFree !== b.isFree) return a.isFree ? -1 : 1;
-        return a.id.localeCompare(b.id);
-      });
+    const src = activeSource.value;
+    const items = await invoke<OpenRouterModelItem[]>('openrouter_list_models', {
+      modelsUrl: src?.modelsUrl || undefined,
+      apiKey: apiKey.value.trim() || undefined,
+    });
+    modelOptions.value = (items || []).map((m) => ({
+      id: m.id,
+      isFree: m.isFree,
+      supportsImage: m.supportsImage,
+      supportsAudio: m.supportsAudio,
+    }));
     if (!modelOptions.value.length) throw new Error('Empty model list.');
     if (!modelOptions.value.some((m) => m.id === model.value)) {
       model.value = modelOptions.value[0].id;
@@ -353,13 +464,18 @@ watch(modelSupportsImage, (supports) => {
     clearPendingImage();
   }
 });
+watch(modelSupportsAudio, (supports) => {
+  if (!supports && pendingAudioDataUrl.value) {
+    clearPendingAudio();
+  }
+});
 
 onMounted(() => {
   void (async () => {
     await loadAiConfig();
     await loadAiChatState();
+    await loadModelOptions();
   })();
-  void loadModelOptions();
   window.addEventListener('pointerdown', onGlobalPointerDown);
   window.addEventListener('keydown', onWindowKeydown, { capture: true });
   window.addEventListener('ai-add-code-ref', onAddCodeRefEvent as EventListener);
@@ -369,6 +485,13 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerdown', onGlobalPointerDown);
   window.removeEventListener('keydown', onWindowKeydown, { capture: true });
   window.removeEventListener('ai-add-code-ref', onAddCodeRefEvent as EventListener);
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  if (mediaStream) {
+    mediaStream.getTracks().forEach((t) => t.stop());
+    mediaStream = null;
+  }
   if (saveAiConfigTimer !== null) {
     window.clearTimeout(saveAiConfigTimer);
     saveAiConfigTimer = null;
@@ -416,8 +539,9 @@ const selectModel = (value: string) => {
   modelSearch.value = '';
 };
 
-const isFreeModel = (value: string) => /-free$/i.test(value);
+const isFreeModel = (value: string) => modelOptions.value.some((m) => m.id === value && m.isFree);
 const supportsImageModel = (value: string) => modelOptions.value.some((m) => m.id === value && m.supportsImage);
+const supportsAudioModel = (value: string) => modelOptions.value.some((m) => m.id === value && m.supportsAudio);
 
 const getEditorContext = () => {
   const path = (window as any).__IDE_ACTIVE_FILE_PATH__ as string | undefined;
@@ -681,6 +805,7 @@ const clearCurrentChatScreen = () => {
   input.value = '';
   failedRequest.value = null;
   clearPendingImage();
+  clearPendingAudio();
   clearPendingCodeRefs();
   scheduleSaveAiChatState();
   showMoreMenu.value = false;
@@ -757,10 +882,90 @@ const openImagePicker = () => {
   fileInputRef.value?.click();
 };
 
+const openAudioPicker = () => {
+  audioInputRef.value?.click();
+};
+
+const stopAudioRecording = () => {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  } else if (mediaStream) {
+    mediaStream.getTracks().forEach((t) => t.stop());
+    mediaStream = null;
+    isRecordingAudio.value = false;
+  }
+};
+
+const toggleAudioRecording = async () => {
+  if (isRecordingAudio.value) {
+    stopAudioRecording();
+    return;
+  }
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      messages.value.push({ role: 'system', content: 'Audio recording is not supported in this environment.' });
+      return;
+    }
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm')
+      ? 'audio/webm'
+      : MediaRecorder.isTypeSupported('audio/ogg')
+        ? 'audio/ogg'
+        : '';
+    mediaRecorder = mimeType ? new MediaRecorder(mediaStream, { mimeType }) : new MediaRecorder(mediaStream);
+    mediaChunks = [];
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) mediaChunks.push(event.data);
+    };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(mediaChunks, { type: mediaRecorder?.mimeType || 'audio/webm' });
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+        const duration = await probeAudioDurationSeconds(dataUrl);
+        if (duration < MIN_AUDIO_DURATION_SECONDS) {
+          messages.value.push({
+            role: 'system',
+            content: `Audio is too short. Minimum duration is ${MIN_AUDIO_DURATION_SECONDS}s.`,
+          });
+          pendingAudioDataUrl.value = '';
+          pendingAudioName.value = '';
+          return;
+        }
+        pendingAudioDataUrl.value = dataUrl;
+        pendingAudioName.value = `recording-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
+      };
+      reader.readAsDataURL(blob);
+      mediaChunks = [];
+      isRecordingAudio.value = false;
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((t) => t.stop());
+        mediaStream = null;
+      }
+    };
+    mediaRecorder.start();
+    isRecordingAudio.value = true;
+  } catch {
+    messages.value.push({ role: 'system', content: 'Microphone access denied or unavailable.' });
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((t) => t.stop());
+      mediaStream = null;
+    }
+    isRecordingAudio.value = false;
+  }
+};
+
 const clearPendingImage = () => {
   pendingImageDataUrl.value = '';
   pendingImageName.value = '';
   if (fileInputRef.value) fileInputRef.value.value = '';
+};
+
+const clearPendingAudio = () => {
+  if (isRecordingAudio.value) stopAudioRecording();
+  pendingAudioDataUrl.value = '';
+  pendingAudioName.value = '';
+  if (audioInputRef.value) audioInputRef.value.value = '';
 };
 
 const clearPendingCodeRefs = () => {
@@ -812,6 +1017,31 @@ const onPickImage = async (event: Event) => {
   reader.onload = () => {
     pendingImageDataUrl.value = typeof reader.result === 'string' ? reader.result : '';
     pendingImageName.value = file.name;
+  };
+  reader.readAsDataURL(file);
+};
+
+const onPickAudio = async (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith('audio/')) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+    const duration = await probeAudioDurationSeconds(dataUrl);
+    if (duration < MIN_AUDIO_DURATION_SECONDS) {
+      messages.value.push({
+        role: 'system',
+        content: `Audio is too short. Minimum duration is ${MIN_AUDIO_DURATION_SECONDS}s.`,
+      });
+      pendingAudioDataUrl.value = '';
+      pendingAudioName.value = '';
+      target.value = '';
+      return;
+    }
+    pendingAudioDataUrl.value = dataUrl;
+    pendingAudioName.value = file.name;
   };
   reader.readAsDataURL(file);
 };
@@ -917,6 +1147,15 @@ const requestChatWithRetry = async (payload: {
   throw lastError;
 };
 
+const toggleThinkingPause = () => {
+  if (!loading.value) return;
+  thinkingPaused.value = !thinkingPaused.value;
+  if (!thinkingPaused.value && pausedStreamBuffer.value && streamingAssistantMessage.value) {
+    streamingAssistantMessage.value.content += pausedStreamBuffer.value;
+    pausedStreamBuffer.value = '';
+  }
+};
+
 const escapeHtml = (text: string) => text
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -960,6 +1199,37 @@ const decodeUtf8Base64 = (text: string) => {
     return '';
   }
 };
+
+const parseAudioDataUrl = (dataUrl: string) => {
+  const m = dataUrl.match(/^data:(audio\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!m) return null;
+  const mime = m[1].toLowerCase();
+  const base64 = m[2];
+  const format = mime.includes('wav')
+    ? 'wav'
+    : mime.includes('mpeg') || mime.includes('mp3')
+      ? 'mp3'
+      : mime.includes('webm')
+        ? 'webm'
+        : mime.includes('ogg')
+          ? 'ogg'
+          : mime.includes('m4a') || mime.includes('mp4')
+            ? 'm4a'
+            : 'wav';
+  return { base64, format };
+};
+
+const probeAudioDurationSeconds = (dataUrl: string) => new Promise<number>((resolve) => {
+  try {
+    const audio = new Audio();
+    audio.preload = 'metadata';
+    audio.src = dataUrl;
+    audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) ? audio.duration : 0);
+    audio.onerror = () => resolve(0);
+  } catch {
+    resolve(0);
+  }
+});
 
 const splitTableRow = (line: string) => line
   .trim()
@@ -1241,8 +1511,9 @@ const makeRequestId = () => {
 const send = async () => {
   const text = input.value.trim();
   const hasImage = !!pendingImageDataUrl.value;
+  const hasAudio = !!pendingAudioDataUrl.value;
   const hasCodeRef = pendingCodeRefs.value.length > 0;
-  if ((!text && !hasImage && !hasCodeRef) || loading.value) return;
+  if ((!text && !hasImage && !hasAudio && !hasCodeRef) || loading.value) return;
   if (!apiKey.value.trim()) {
     messages.value.push({ role: 'assistant', content: 'Please set API Key in AI settings first.' });
     showSettings.value = true;
@@ -1250,41 +1521,63 @@ const send = async () => {
   }
 
   const context = getEditorContext();
-  const baseText = text || (hasImage ? 'Please analyze the attached image.' : 'Please analyze the attached code.');
+  const baseText = text || (hasImage
+    ? 'Please analyze the attached image.'
+    : hasAudio
+      ? 'Please analyze the attached audio.'
+      : 'Please analyze the attached code.');
   const codeRefText = buildCodeRefContext();
   const composed = [baseText, codeRefText, context].filter((part) => !!part).join('\n\n---\n\n');
   const userContent = composed;
   messages.value.push({
     role: 'user',
-    content: text || (hasImage ? '[Image]' : getCodeRefLabel()),
+    content: text || (hasImage ? '[Image]' : hasAudio ? '[Audio]' : getCodeRefLabel()),
     imageUrl: pendingImageDataUrl.value || undefined,
+    audioUrl: pendingAudioDataUrl.value || undefined,
   });
   const payloadMessages = messages.value
     .filter((m) => m.role !== 'system')
     .map((m) => {
-      if (m.role === 'user' && m.imageUrl) {
+      if (m.role === 'user' && (m.imageUrl || m.audioUrl)) {
+        const parts: any[] = [
+          { type: 'text', text: m.content || 'Please analyze the attached media.' },
+        ];
+        if (m.imageUrl) {
+          parts.push({ type: 'image_url', image_url: { url: m.imageUrl } });
+        }
+        if (m.audioUrl) {
+          const audio = parseAudioDataUrl(m.audioUrl);
+          if (audio) {
+            parts.push({ type: 'input_audio', input_audio: { data: audio.base64, format: audio.format } });
+          }
+        }
         return {
           role: 'user',
-          content: [
-            { type: 'text', text: m.content || 'Please analyze the attached image.' },
-            { type: 'image_url', image_url: { url: m.imageUrl } },
-          ],
+          content: parts,
         };
       }
       return { role: m.role, content: m.content };
     });
-  payloadMessages[payloadMessages.length - 1] = hasImage
-    ? {
-        role: 'user',
-        content: [
-          { type: 'text', text: userContent },
-          { type: 'image_url', image_url: { url: pendingImageDataUrl.value } },
-        ],
+  if (hasImage || hasAudio) {
+    const parts: any[] = [{ type: 'text', text: userContent }];
+    if (hasImage) {
+      parts.push({ type: 'image_url', image_url: { url: pendingImageDataUrl.value } });
+    }
+    if (hasAudio) {
+      const audio = parseAudioDataUrl(pendingAudioDataUrl.value);
+      if (audio) {
+        parts.push({ type: 'input_audio', input_audio: { data: audio.base64, format: audio.format } });
       }
-    : { role: 'user', content: userContent };
+    }
+    payloadMessages[payloadMessages.length - 1] = { role: 'user', content: parts };
+  } else {
+    payloadMessages[payloadMessages.length - 1] = { role: 'user', content: userContent };
+  }
 
   input.value = '';
   loading.value = true;
+  thinkingPaused.value = false;
+  pausedStreamBuffer.value = '';
   messages.value.push({ role: 'assistant', content: '' });
   const assistantMsg = messages.value[messages.value.length - 1] as ChatMessage;
   streamingAssistantMessage.value = assistantMsg;
@@ -1295,7 +1588,13 @@ const send = async () => {
     stopListen = await listen<ChatStreamChunkEvent>('aihub_chat_chunk', (event) => {
       const data = event.payload;
       if (!data || data.requestId !== requestId) return;
-      assistantMsg.content += String(data.chunk || '');
+      const chunk = String(data.chunk || '');
+      if (!chunk) return;
+      if (thinkingPaused.value) {
+        pausedStreamBuffer.value += chunk;
+      } else {
+        assistantMsg.content += chunk;
+      }
     });
     const result = await invoke<ChatResult>('aihub_chat_stream', {
       requestId,
@@ -1311,6 +1610,7 @@ const send = async () => {
     } else if (!assistantMsg.content.trim()) {
       assistantMsg.content = 'No response.';
     }
+    pausedStreamBuffer.value = '';
     failedRequest.value = null;
     if (result?.switched && result?.model) {
       messages.value.push({
@@ -1341,9 +1641,12 @@ const send = async () => {
     if (stopListen) stopListen();
     streamingAssistantMessage.value = null;
     loading.value = false;
+    thinkingPaused.value = false;
+    pausedStreamBuffer.value = '';
     // Persist final assistant output after stream completion.
     scheduleSaveAiChatState();
     clearPendingImage();
+    clearPendingAudio();
     clearPendingCodeRefs();
   }
 };
@@ -1518,6 +1821,40 @@ watch(modelPicker, async (value) => {
         <div v-if="title === 'AI Assistant'" class="ai-placeholder">
           <div v-if="showSettings" class="ai-settings">
             <label>
+              <span>Model Source</span>
+              <div class="model-row">
+                <div class="model-picker source-picker">
+                  <UiSelect
+                    :model-value="activeSourceId"
+                    :options="sourceSelectOptions"
+                    @update:model-value="applyActiveSource"
+                  />
+                </div>
+                <button class="mini-btn" @click="startEditSource()">Add</button>
+              </div>
+              <div class="source-list">
+                <div v-for="s in sources" :key="`src-${s.id}`" class="source-item">
+                  <div class="source-main">
+                    <span class="source-name">{{ s.name }}</span>
+                    <span class="hint">{{ s.modelsUrl }}</span>
+                  </div>
+                  <div class="source-actions">
+                    <button class="mini-btn" @click="startEditSource(s)">Edit</button>
+                    <button class="mini-btn danger" :disabled="sources.length <= 1" @click="removeSource(s.id)">Delete</button>
+                  </div>
+                </div>
+              </div>
+              <div v-if="sourceDraft.id" class="source-editor">
+                <input v-model="sourceDraft.name" type="text" placeholder="Source name">
+                <input v-model="sourceDraft.modelsUrl" type="text" placeholder="Models URL">
+                <input v-model="sourceDraft.chatBaseUrl" type="text" placeholder="Chat Base URL">
+                <div class="source-actions">
+                  <button class="mini-btn" @click="saveSourceDraft">Save Source</button>
+                  <button class="mini-btn" @click="sourceDraft = { id: '', name: '', modelsUrl: '', chatBaseUrl: '' }">Cancel</button>
+                </div>
+              </div>
+            </label>
+            <label>
               <span>Base URL</span>
               <input v-model="apiBaseUrl" type="text" placeholder="https://aihubmix.com/v1">
             </label>
@@ -1532,6 +1869,7 @@ watch(modelPicker, async (value) => {
                   >
                     <span class="model-select-text">{{ model }}</span>
                     <span v-if="isFreeModel(model)" class="free-badge compact">FR</span>
+                    <span v-if="supportsAudioModel(model)" class="modality-badge compact audio">AU</span>
                     <span class="modality-badge compact" :class="supportsImageModel(model) ? 'image' : 'text'">
                       {{ supportsImageModel(model) ? 'IM' : 'TX' }}
                     </span>
@@ -1562,6 +1900,7 @@ watch(modelPicker, async (value) => {
                       <span class="model-option-text">{{ m.id }}</span>
                       <span class="model-option-badges">
                         <span v-if="m.isFree" class="free-badge">FR</span>
+                        <span v-if="m.supportsAudio" class="modality-badge audio">AU</span>
                         <span class="modality-badge" :class="m.supportsImage ? 'image' : 'text'">
                           {{ m.supportsImage ? 'IM' : 'TX' }}
                         </span>
@@ -1578,7 +1917,10 @@ watch(modelPicker, async (value) => {
             </label>
             <label>
               <span>API Key</span>
-              <input v-model="apiKey" type="password" placeholder="sk-...">
+              <div class="model-row">
+                <input v-model="apiKey" :type="apiKeyVisible ? 'text' : 'password'" placeholder="sk-...">
+                <button class="mini-btn" @click="apiKeyVisible = !apiKeyVisible">{{ apiKeyVisible ? 'Hide' : 'Show' }}</button>
+              </div>
             </label>
             <label class="check">
               <input v-model="autoContext" type="checkbox">
@@ -1647,7 +1989,7 @@ watch(modelPicker, async (value) => {
                 class="stream-wait-text"
                 aria-hidden="true"
               >
-                <span class="stream-wait-text-inner">Thinking...</span>
+                <span class="stream-wait-text-inner">{{ thinkingPaused ? 'Thinking paused...' : 'Thinking...' }}</span>
               </span>
               <img v-if="message.imageUrl" class="msg-image" :src="message.imageUrl" alt="uploaded image">
             </div>
@@ -1660,9 +2002,21 @@ watch(modelPicker, async (value) => {
               accept="image/*"
               @change="onPickImage"
             >
+            <input
+              ref="audioInputRef"
+              class="hidden-file"
+              type="file"
+              accept="audio/*"
+              @change="onPickAudio"
+            >
             <div v-if="pendingImageDataUrl" class="pending-image">
               <img :src="pendingImageDataUrl" :alt="pendingImageName || 'image'">
               <button class="mini-btn danger" @click="clearPendingImage">Remove</button>
+            </div>
+            <div v-if="pendingAudioDataUrl" class="pending-audio">
+              <audio class="audio-preview" :src="pendingAudioDataUrl" controls preload="metadata" />
+              <div class="audio-meta">{{ pendingAudioName || 'audio' }}</div>
+              <button class="mini-btn danger" @click="clearPendingAudio">Remove</button>
             </div>
             <div v-if="pendingCodeRefs.length" class="pending-code">
               <div class="code-chip-list">
@@ -1697,6 +2051,7 @@ watch(modelPicker, async (value) => {
                 >
                   <span class="model-select-text">{{ model }}</span>
                   <span v-if="isFreeModel(model)" class="free-badge compact">FR</span>
+                  <span v-if="supportsAudioModel(model)" class="modality-badge compact audio">AU</span>
                   <span class="modality-badge compact" :class="supportsImageModel(model) ? 'image' : 'text'">
                     {{ supportsImageModel(model) ? 'IM' : 'TX' }}
                   </span>
@@ -1727,6 +2082,7 @@ watch(modelPicker, async (value) => {
                     <span class="model-option-text">{{ m.id }}</span>
                     <span class="model-option-badges">
                       <span v-if="m.isFree" class="free-badge">FR</span>
+                      <span v-if="m.supportsAudio" class="modality-badge audio">AU</span>
                       <span class="modality-badge" :class="m.supportsImage ? 'image' : 'text'">
                         {{ m.supportsImage ? 'IM' : 'TX' }}
                       </span>
@@ -1747,7 +2103,27 @@ watch(modelPicker, async (value) => {
                 <button v-if="modelSupportsImage" class="mini-btn image-btn" title="Upload Image" @click="openImagePicker">
                   <FontAwesomeIcon :icon="['fas', 'image']" />
                 </button>
-                <button class="send-btn" :disabled="loading || (!input.trim() && !pendingImageDataUrl && !pendingCodeRefs.length)" @click="send">
+                <button v-if="modelSupportsAudio" class="mini-btn image-btn" title="Upload Audio" @click="openAudioPicker">
+                  <FontAwesomeIcon :icon="['fas', 'upload']" />
+                </button>
+                <button
+                  v-if="modelSupportsAudio"
+                  class="mini-btn image-btn"
+                  :class="{ recording: isRecordingAudio }"
+                  :title="isRecordingAudio ? 'Stop Recording' : 'Record Audio'"
+                  @click="toggleAudioRecording"
+                >
+                  <FontAwesomeIcon :icon="['fas', isRecordingAudio ? 'square' : 'microphone']" />
+                </button>
+                <button
+                  v-if="loading"
+                  class="mini-btn"
+                  :title="thinkingPaused ? 'Resume thinking output' : 'Pause thinking output'"
+                  @click="toggleThinkingPause"
+                >
+                  {{ thinkingPaused ? 'Resume' : 'Pause' }}
+                </button>
+                <button class="send-btn" :disabled="loading || (!input.trim() && !pendingImageDataUrl && !pendingAudioDataUrl && !pendingCodeRefs.length)" @click="send">
                   {{ loading ? 'Thinking...' : 'Send' }}
                 </button>
               </div>
@@ -2251,6 +2627,7 @@ watch(modelPicker, async (value) => {
         background: var(--ide-bg-editor);
         color: var(--ide-text);
         padding: 0 8px;
+        font-size: var(--ide-tree-font-size, 12px);
         transition: border-color 0.12s ease, box-shadow 0.12s ease;
       }
       input:not([type='checkbox']):focus {
@@ -2283,10 +2660,99 @@ watch(modelPicker, async (value) => {
         flex: 1;
         min-width: 0;
       }
+      .source-picker {
+        :deep(.ui-select-trigger) {
+          height: 28px;
+          border: 1px solid var(--ide-border);
+          border-radius: 5px;
+          background: var(--ide-bg-editor);
+          color: var(--ide-text);
+          padding: 0 8px;
+          font-size: 11px;
+          font-weight: 500;
+        }
+        :deep(.ui-select:hover .ui-select-trigger) {
+          background: var(--ide-hover);
+          border-color: var(--ide-border);
+        }
+        :deep(.ui-select:focus-visible .ui-select-trigger),
+        :deep(.ui-select.open .ui-select-trigger) {
+          border-color: color-mix(in srgb, var(--ide-accent) 60%, var(--ide-border));
+          box-shadow: 0 0 0 2px color-mix(in srgb, var(--ide-accent) 24%, transparent);
+        }
+        :deep(.ui-select-caret) {
+          color: var(--ide-text-muted);
+        }
+        :deep(.ui-select-popover) {
+          top: calc(100% + 4px);
+          border: 1px solid var(--ide-border);
+          border-radius: 8px;
+          background: var(--ide-bg-main);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+          z-index: 60;
+        }
+        :deep(.ui-select-list) {
+          max-height: 220px;
+          padding: 0;
+        }
+        :deep(.ui-select-option) {
+          height: 31px;
+          padding: 0 10px;
+          border-radius: 0;
+          font-size: 12px;
+          border: none;
+        }
+        :deep(.ui-select-option:hover:not(.disabled)),
+        :deep(.ui-select-option.active:not(.disabled)) {
+          background: var(--ide-hover);
+        }
+        :deep(.ui-select-option.selected:not(.disabled)) {
+          background: color-mix(in srgb, var(--ide-accent) 22%, transparent);
+        }
+      }
       .mini-btn {
         flex: 0 0 auto;
         min-width: 74px;
+        height: 28px;
+        padding: 0 10px;
       }
+    }
+    .source-list {
+      display: grid;
+      gap: 6px;
+      max-height: 132px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+    .source-item {
+      border: 1px solid var(--ide-border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .source-main {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+    .source-name {
+      font-size: 12px;
+      color: var(--ide-text);
+    }
+    .source-actions {
+      display: flex;
+      gap: 6px;
+      .mini-btn {
+        min-width: 56px;
+      }
+    }
+    .source-editor {
+      margin-top: 6px;
+      display: grid;
+      gap: 6px;
     }
     .hint {
       font-size: 11px;
@@ -2683,6 +3149,30 @@ watch(modelPicker, async (value) => {
         color: #ef8a8a;
       }
     }
+    .pending-audio {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      .audio-preview {
+        width: min(340px, 100%);
+        max-width: 100%;
+        height: 28px;
+      }
+      .audio-meta {
+        min-width: 0;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--ide-text-muted);
+        font-size: 11px;
+      }
+      .mini-btn.danger {
+        border-color: #9f3b3b;
+        color: #ef8a8a;
+      }
+    }
     .pending-code {
       display: flex;
       align-items: flex-start;
@@ -2820,6 +3310,11 @@ watch(modelPicker, async (value) => {
           border-color: color-mix(in srgb, var(--ide-accent) 45%, var(--ide-border));
           color: var(--ide-text);
           background: color-mix(in srgb, var(--ide-accent) 14%, transparent);
+        }
+        .image-btn.recording {
+          border-color: color-mix(in srgb, #ef6b6b 55%, var(--ide-border));
+          color: #ffb3b3;
+          background: color-mix(in srgb, #ef6b6b 20%, transparent);
         }
       }
       .send-btn {
@@ -2994,6 +3489,11 @@ watch(modelPicker, async (value) => {
   border-color: color-mix(in srgb, #5ea2ff 45%, var(--ide-border));
   background: color-mix(in srgb, #5ea2ff 20%, transparent);
   color: #b8d7ff;
+}
+.modality-badge.audio {
+  border-color: color-mix(in srgb, #f6ad55 45%, var(--ide-border));
+  background: color-mix(in srgb, #f6ad55 20%, transparent);
+  color: color-mix(in srgb, #f6ad55 78%, #fff 22%);
 }
 .modality-badge.text {
   border-color: color-mix(in srgb, #a7adb8 35%, var(--ide-border));

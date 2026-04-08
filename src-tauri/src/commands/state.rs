@@ -23,6 +23,19 @@ pub struct AiConfig {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    #[serde(default)]
+    pub active_source_id: String,
+    #[serde(default)]
+    pub sources: Vec<AiSourceConfig>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSourceConfig {
+    pub id: String,
+    pub name: String,
+    pub models_url: String,
+    pub chat_base_url: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -115,11 +128,40 @@ pub fn load_ai_config(app: tauri::AppHandle) -> Result<AiConfig, String> {
         .map_err(|e| e.to_string())?
         .map(|v| v.value().to_string())
         .unwrap_or_else(|| "gpt-4o-mini".to_string());
+    let active_source_id = table
+        .get("ai_active_source_id")
+        .map_err(|e| e.to_string())?
+        .map(|v| v.value().to_string())
+        .unwrap_or_else(|| "openrouter".to_string());
+    let sources = table
+        .get("ai_sources")
+        .map_err(|e| e.to_string())?
+        .map(|v| v.value().to_string())
+        .and_then(|s| serde_json::from_str::<Vec<AiSourceConfig>>(&s).ok())
+        .unwrap_or_else(|| {
+            vec![
+                AiSourceConfig {
+                    id: "openrouter".to_string(),
+                    name: "OpenRouter".to_string(),
+                    models_url: "https://openrouter.ai/api/v1/models?output_modalities=all"
+                        .to_string(),
+                    chat_base_url: "https://openrouter.ai/api/v1".to_string(),
+                },
+                AiSourceConfig {
+                    id: "aihubmix".to_string(),
+                    name: "Aihubmix".to_string(),
+                    models_url: "https://aihubmix.com/api/v1/models".to_string(),
+                    chat_base_url: "https://aihubmix.com/v1".to_string(),
+                },
+            ]
+        });
 
     Ok(AiConfig {
         base_url,
         api_key,
         model,
+        active_source_id,
+        sources,
     })
 }
 
@@ -137,6 +179,13 @@ pub fn save_ai_config(app: tauri::AppHandle, config: AiConfig) -> Result<(), Str
             .map_err(|e| e.to_string())?;
         table
             .insert("ai_model", config.model.as_str())
+            .map_err(|e| e.to_string())?;
+        table
+            .insert("ai_active_source_id", config.active_source_id.as_str())
+            .map_err(|e| e.to_string())?;
+        let sources_json = serde_json::to_string(&config.sources).map_err(|e| e.to_string())?;
+        table
+            .insert("ai_sources", sources_json.as_str())
             .map_err(|e| e.to_string())?;
     }
     write_txn.commit().map_err(|e| e.to_string())?;

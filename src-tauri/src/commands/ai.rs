@@ -61,6 +61,7 @@ const AI_FREE_RR_INDEX_KEY: &str = "ai_free_rr_index";
 const AI_FREE_COOLDOWN_KEY: &str = "ai_free_cooldown_json";
 const AI_FREE_COOLDOWN_MS: u64 = 5 * 60 * 1000;
 const AI_FREE_FALLBACK_LIMIT: usize = 3;
+const AI_FREE_429_RETRY_MAX: usize = 2;
 
 fn load_ai_config(app: &tauri::AppHandle) -> Result<(String, String), String> {
     let db = open_state_db(app)?;
@@ -119,7 +120,12 @@ fn root_from_base_url(base_url: &str) -> String {
 }
 
 fn is_free_model_id(model: &str) -> bool {
-    model.trim().to_ascii_lowercase().ends_with("-free")
+    let id = model.trim().to_ascii_lowercase();
+    id.ends_with("-free") || id.ends_with(":free") || id.contains(":free:")
+}
+
+fn is_http_429_error(err: &str) -> bool {
+    err.contains("HTTP 429")
 }
 
 async fn call_chat_once(
@@ -175,6 +181,42 @@ async fn call_chat_once(
     } else {
         Ok(content)
     }
+}
+
+async fn call_chat_with_429_retry(
+    client: &reqwest::Client,
+    endpoint: &str,
+    api_key: &str,
+    model: &str,
+    messages: &Value,
+    temperature: f32,
+    stream: bool,
+    allow_retry: bool,
+) -> Result<String, String> {
+    let max_retry = if allow_retry { AI_FREE_429_RETRY_MAX } else { 0 };
+    let mut last_err = String::new();
+    for attempt in 0..=max_retry {
+        match call_chat_once(
+            client,
+            endpoint,
+            api_key,
+            model,
+            messages,
+            temperature,
+            stream,
+        )
+        .await
+        {
+            Ok(content) => return Ok(content),
+            Err(err) => {
+                last_err = err;
+                if attempt >= max_retry || !is_http_429_error(&last_err) {
+                    break;
+                }
+            }
+        }
+    }
+    Err(last_err)
 }
 
 async fn call_chat_once_stream(
@@ -308,6 +350,46 @@ async fn call_chat_once_stream(
     } else {
         Ok((content, emitted_any))
     }
+}
+
+async fn call_chat_stream_with_429_retry(
+    app: &tauri::AppHandle,
+    request_id: &str,
+    client: &reqwest::Client,
+    endpoint: &str,
+    api_key: &str,
+    model: &str,
+    messages: &Value,
+    temperature: f32,
+    stream: bool,
+    allow_retry: bool,
+) -> Result<(String, bool), String> {
+    let max_retry = if allow_retry { AI_FREE_429_RETRY_MAX } else { 0 };
+    let mut last_err = String::new();
+    for attempt in 0..=max_retry {
+        match call_chat_once_stream(
+            app,
+            request_id,
+            client,
+            endpoint,
+            api_key,
+            model,
+            messages,
+            temperature,
+            stream,
+        )
+        .await
+        {
+            Ok(result) => return Ok(result),
+            Err(err) => {
+                last_err = err;
+                if attempt >= max_retry || !is_http_429_error(&last_err) {
+                    break;
+                }
+            }
+        }
+    }
+    Err(last_err)
 }
 
 async fn load_free_models(
@@ -444,7 +526,7 @@ pub async fn aihub_chat(
     let preferred_model = payload.model.trim().to_string();
 
     let mut failed_reasons: Vec<String> = Vec::new();
-    match call_chat_once(
+    match call_chat_with_429_retry(
         &client,
         &endpoint,
         &api_key,
@@ -452,6 +534,7 @@ pub async fn aihub_chat(
         &payload.messages,
         temperature,
         stream,
+        is_free_model_id(&preferred_model),
     )
     .await
     {
@@ -491,7 +574,7 @@ pub async fn aihub_chat(
     );
     let mut last_error = String::from("Primary model failed, and no free fallback model is available.");
     for free_model in candidates {
-        match call_chat_once(
+        match call_chat_with_429_retry(
             &client,
             &endpoint,
             &api_key,
@@ -499,6 +582,7 @@ pub async fn aihub_chat(
             &payload.messages,
             temperature,
             stream,
+            true,
         )
         .await
         {
@@ -554,7 +638,7 @@ pub async fn aihub_chat_stream(
     let preferred_model = payload.model.trim().to_string();
 
     let mut failed_reasons: Vec<String> = Vec::new();
-    match call_chat_once_stream(
+    match call_chat_stream_with_429_retry(
         &app,
         &request_id,
         &client,
@@ -564,6 +648,7 @@ pub async fn aihub_chat_stream(
         &payload.messages,
         temperature,
         stream,
+        is_free_model_id(&preferred_model),
     )
     .await
     {
@@ -603,7 +688,7 @@ pub async fn aihub_chat_stream(
     );
     let mut last_error = String::from("Primary model failed, and no free fallback model is available.");
     for free_model in candidates {
-        match call_chat_once_stream(
+        match call_chat_stream_with_429_retry(
             &app,
             &request_id,
             &client,
@@ -613,6 +698,7 @@ pub async fn aihub_chat_stream(
             &payload.messages,
             temperature,
             stream,
+            true,
         )
         .await
         {
@@ -671,4 +757,206 @@ pub async fn aihub_connection_status(app: tauri::AppHandle) -> Result<bool, Stri
         Ok(resp) => Ok(resp.status().is_success()),
         Err(_) => Ok(false),
     }
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenRouterModelItem {
+    pub id: String,
+    pub is_free: bool,
+    pub supports_image: bool,
+    pub supports_audio: bool,
+    pub input_modalities: Vec<String>,
+    pub output_modalities: Vec<String>,
+}
+
+fn parse_modalities(value: Option<&Value>) -> Vec<String> {
+    let Some(v) = value else {
+        return vec![];
+    };
+    if let Some(arr) = v.as_array() {
+        return arr
+            .iter()
+            .filter_map(|x| x.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+    if let Some(s) = v.as_str() {
+        return s
+            .split(',')
+            .map(|x| x.trim().to_string())
+            .filter(|x| !x.is_empty())
+            .collect();
+    }
+    vec![]
+}
+
+fn parse_pricing_number(value: Option<&Value>) -> Option<f64> {
+    let Some(v) = value else {
+        return None;
+    };
+    if let Some(n) = v.as_f64() {
+        return Some(n);
+    }
+    if let Some(s) = v.as_str() {
+        return s.trim().parse::<f64>().ok();
+    }
+    None
+}
+
+fn has_modality(modalities: &[String], target: &str) -> bool {
+    modalities.iter().any(|m| m.eq_ignore_ascii_case(target))
+}
+
+fn is_chat_model(
+    input_modalities: &[String],
+    output_modalities: &[String],
+    modality_text: Option<&str>,
+    model_type: Option<&str>,
+) -> bool {
+    if let Some(t) = model_type {
+        let t = t.trim().to_ascii_lowercase();
+        if t == "llm" || t == "chat" || t == "text" {
+            return true;
+        }
+        if t == "video" || t == "image" || t == "audio" || t == "rerank" || t == "embedding" {
+            return false;
+        }
+    }
+    // Chat-completions compatible models should at least accept text input and produce text output.
+    if has_modality(input_modalities, "text") && has_modality(output_modalities, "text") {
+        return true;
+    }
+    // Some providers only expose input modalities for text models.
+    if has_modality(input_modalities, "text") && output_modalities.is_empty() {
+        return true;
+    }
+    // Fallback for providers exposing only architecture.modality string.
+    modality_text
+        .map(|s| {
+            let v = s.to_ascii_lowercase();
+            v.contains("->text") && v.contains("text")
+        })
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+pub async fn openrouter_list_models(
+    models_url: Option<String>,
+    api_key: Option<String>,
+) -> Result<Vec<OpenRouterModelItem>, String> {
+    let endpoint = models_url
+        .unwrap_or_else(|| "https://openrouter.ai/api/v1/models?output_modalities=all".to_string());
+    let client = reqwest::Client::new();
+    let mut req = client.get(endpoint).timeout(Duration::from_secs(12));
+    if let Some(k) = api_key.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+        req = req.bearer_auth(k);
+    }
+    let resp = req.send().await.map_err(|e| format!("Request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(if body.trim().is_empty() {
+            format!("OpenRouter error: HTTP {status}")
+        } else {
+            format!("OpenRouter error: HTTP {status} - {body}")
+        });
+    }
+
+    let json = resp
+        .json::<Value>()
+        .await
+        .map_err(|e| format!("Invalid OpenRouter response: {e}"))?;
+    let Some(items) = json.get("data").and_then(|v| v.as_array()) else {
+        return Err("Invalid OpenRouter response: missing data[]".to_string());
+    };
+
+    let mut out: Vec<OpenRouterModelItem> = Vec::new();
+    for item in items {
+        let id = item
+            .get("id")
+            .or_else(|| item.get("model_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if id.is_empty() {
+            continue;
+        }
+
+        // OpenRouter modalities live under `architecture` (preferred), but keep a top-level fallback for robustness.
+        let arch = item.get("architecture");
+        let input_modalities = {
+            let from_arch = parse_modalities(arch.and_then(|a| a.get("input_modalities")));
+            if !from_arch.is_empty() {
+                from_arch
+            } else {
+                parse_modalities(item.get("input_modalities"))
+            }
+        };
+        let mut output_modalities = {
+            let from_arch = parse_modalities(arch.and_then(|a| a.get("output_modalities")));
+            if !from_arch.is_empty() {
+                from_arch
+            } else {
+                parse_modalities(item.get("output_modalities"))
+            }
+        };
+        let model_type = item.get("types").and_then(|v| v.as_str());
+        if output_modalities.is_empty() && matches!(model_type, Some("llm" | "chat" | "text")) {
+            output_modalities.push("text".to_string());
+        }
+
+        let modality_text = arch.and_then(|a| a.get("modality")).and_then(|v| v.as_str());
+        let supports_image = has_modality(&input_modalities, "image")
+            || modality_text
+                .map(|s| s.to_ascii_lowercase().contains("image"))
+                .unwrap_or(false);
+
+        let supports_audio = has_modality(&input_modalities, "audio")
+            || has_modality(&output_modalities, "audio")
+            || modality_text
+                .map(|s| s.to_ascii_lowercase().contains("audio"))
+                .unwrap_or(false);
+
+        if !is_chat_model(&input_modalities, &output_modalities, modality_text, model_type) {
+            continue;
+        }
+
+        // Strict free detection: only treat as free when both prompt and completion are exactly zero.
+        let pricing = item.get("pricing");
+        let prompt_price = parse_pricing_number(
+            pricing
+                .and_then(|p| p.get("prompt"))
+                .or_else(|| pricing.and_then(|p| p.get("input"))),
+        );
+        let completion_price = parse_pricing_number(
+            pricing
+                .and_then(|p| p.get("completion"))
+                .or_else(|| pricing.and_then(|p| p.get("output"))),
+        );
+        let is_free = match (prompt_price, completion_price) {
+            (Some(p), Some(c)) => p <= 0.0 && c <= 0.0,
+            _ => false,
+        };
+
+        out.push(OpenRouterModelItem {
+            id,
+            is_free,
+            supports_image,
+            supports_audio,
+            input_modalities,
+            output_modalities,
+        });
+    }
+
+    out.sort_by(|a, b| {
+        if a.is_free != b.is_free {
+            return if a.is_free { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+        }
+        a.id.cmp(&b.id)
+    });
+    Ok(out)
 }

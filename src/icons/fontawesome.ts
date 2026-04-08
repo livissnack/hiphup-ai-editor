@@ -38,6 +38,8 @@ import {
   faCheck,
   faUpload,
   faGlobe,
+  faMicrophone,
+  faStop,
 } from '@fortawesome/free-solid-svg-icons';
 import { faClone, faClock as farClock } from '@fortawesome/free-regular-svg-icons';
 
@@ -78,6 +80,8 @@ library.add(
   faCheck,
   faUpload,
   faGlobe,
+  faMicrophone,
+  faStop,
   faClone,
   farClock,
 );
