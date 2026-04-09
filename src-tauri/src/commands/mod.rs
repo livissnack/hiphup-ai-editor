@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod agent;
 pub mod cli_shim;
 pub mod db;
 pub mod fs;

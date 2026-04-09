@@ -1,6 +1,6 @@
 mod commands;
 
-use commands::{ai, cli_shim, fs, git, state, terminal};
+use commands::{agent, ai, cli_shim, fs, git, state, terminal};
 use std::sync::{Arc, Mutex};
 
 #[tauri::command]
@@ -59,6 +59,12 @@ pub fn run() {
             ai::aihub_chat_stream,
             ai::aihub_connection_status,
             ai::openrouter_list_models,
+            agent::agent_start_run,
+            agent::agent_get_run,
+            agent::agent_stop_run,
+            agent::agent_search_code,
+            agent::agent_read_file,
+            agent::agent_write_file,
             cli_shim::take_cli_launch_paths,
             cli_shim::install_cli_in_path
         ])

@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import TitleBar from './components/layout/TitleBar.vue';
 import LeftSideBar from './components/layout/LeftSideBar.vue';
 import RightSideBar from './components/layout/RightSideBar.vue';
+import AgentPanel from './components/layout/AgentPanel.vue';
 import ProjectTree from './components/layout/ProjectTree.vue';
 import EditorMain from './components/layout/EditorMain.vue';
 import ToolWindow from './components/layout/ToolWindow.vue'; // 右侧面板
@@ -72,6 +73,7 @@ type GitPanelExpose = {
 const showProject = ref(true);
 const leftTool = ref<LeftTool>('explorer');
 const showAI = ref(false);
+const showAgent = ref(false);
 const showBottom = ref(false);
 const bottomTool = ref<'terminal' | 'git'>('terminal');
 
@@ -1827,7 +1829,9 @@ const handleMenuAction = async (action: string) => {
     return;
   }
   if (action === 'view-toggle-ai') {
-    showAI.value = !showAI.value;
+    const next = !showAI.value;
+    showAI.value = next;
+    if (next) showAgent.value = false;
     return;
   }
   if (action === 'view-toggle-terminal') {
@@ -3029,6 +3033,33 @@ watch(
   },
 );
 
+watch(showAgent, (v) => {
+  if (v) showAI.value = true;
+});
+watch(showAI, (v) => {
+  if (!v) showAgent.value = false;
+});
+
+const onAiPanelToggle = (next: boolean) => {
+  if (!next) {
+    showAI.value = false;
+    showAgent.value = false;
+    return;
+  }
+  showAI.value = true;
+  showAgent.value = false;
+};
+
+const onAgentPanelToggle = (next: boolean) => {
+  if (!next) {
+    showAI.value = false;
+    showAgent.value = false;
+    return;
+  }
+  showAI.value = true;
+  showAgent.value = true;
+};
+
 watch(
   () => [activeTab.value?.path, activeTab.value?.content] as const,
   ([path]) => {
@@ -3274,7 +3305,12 @@ watch(treeRevealPath, (path) => {
         </section>
         </div>
 
-        <RightSideBar v-model:active="showAI" />
+        <RightSideBar
+          :active="showAI"
+          :agent-active="showAgent"
+          @update:active="onAiPanelToggle"
+          @update:agent-active="onAgentPanelToggle"
+        />
       </div>
 
       <div
@@ -3284,11 +3320,13 @@ watch(treeRevealPath, (path) => {
         @pointerdown="startAiResize"
       />
       <ToolWindow
+        v-if="!showAgent"
         :open="showAI"
         title="AI Assistant"
         position="right"
         @close="showAI = false"
       />
+      <AgentPanel v-else :open="showAI" @close="showAI = false; showAgent = false" />
     </div>
 
     <StatusBar

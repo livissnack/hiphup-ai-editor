@@ -1,10 +1,12 @@
 <script setup lang="ts">
 const props = defineProps<{
   active: boolean;
+  agentActive: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'update:active', value: boolean): void;
+  (e: 'update:agentActive', value: boolean): void;
 }>();
 </script>
 
@@ -13,11 +15,19 @@ const emit = defineEmits<{
     <div class="group top">
       <button
         class="icon-btn"
-        :class="{ active: active }"
+        :class="{ active: active && !agentActive }"
         title="AI Assistant"
         @click="emit('update:active', !active)"
       >
         <span class="v-text">AI Assistant</span>
+      </button>
+      <button
+        class="icon-btn"
+        :class="{ active: agentActive }"
+        title="Agent"
+        @click="emit('update:agentActive', !agentActive)"
+      >
+        <span class="v-text">Agent</span>
       </button>
     </div>
   </aside>

@@ -50,6 +50,8 @@ type AiSourceItem = {
   name: string;
   modelsUrl: string;
   chatBaseUrl: string;
+  /** API key for this provider only (OpenRouter vs Aihubmix keys differ). */
+  apiKey?: string;
 };
 type PendingCodeRef = {
   id: string;
@@ -84,10 +86,11 @@ const autoContext = ref(true);
 const model = ref('gpt-4o-mini');
 const apiBaseUrl = ref('https://aihubmix.com/v1');
 const apiKey = ref('');
-const apiKeyVisible = ref(false);
+/** Show/hide API key while editing a source (Add/Edit form). */
+const sourceApiKeyVisible = ref(false);
 const sources = ref<AiSourceItem[]>([]);
 const activeSourceId = ref('openrouter');
-const sourceDraft = ref<AiSourceItem>({ id: '', name: '', modelsUrl: '', chatBaseUrl: '' });
+const sourceDraft = ref<AiSourceItem>({ id: '', name: '', modelsUrl: '', chatBaseUrl: '', apiKey: '' });
 const editingSourceId = ref('');
 const showSettings = ref(false);
 const chatScrollRef = ref<HTMLElement | null>(null);
@@ -220,6 +223,7 @@ const syncActiveSessionFromView = () => {
 };
 
 const loadAiConfig = async () => {
+  let migratedLegacyKeyToSource = false;
   try {
     const config = await invoke<{
       baseUrl: string;
@@ -238,6 +242,7 @@ const loadAiConfig = async () => {
           name: String(s.name || '').trim(),
           modelsUrl: String(s.modelsUrl || '').trim(),
           chatBaseUrl: String(s.chatBaseUrl || '').trim(),
+          apiKey: typeof (s as { apiKey?: string }).apiKey === 'string' ? (s as { apiKey: string }).apiKey : '',
         }))
         .filter((s) => s.id && s.name && s.modelsUrl && s.chatBaseUrl);
     }
@@ -248,6 +253,7 @@ const loadAiConfig = async () => {
           name: 'OpenRouter',
           modelsUrl: 'https://openrouter.ai/api/v1/models?output_modalities=all',
           chatBaseUrl: 'https://openrouter.ai/api/v1',
+          apiKey: '',
         },
       ];
     }
@@ -256,10 +262,22 @@ const loadAiConfig = async () => {
     } else {
       activeSourceId.value = sources.value[0].id;
     }
+    const legacyKey = typeof config?.apiKey === 'string' ? config.apiKey.trim() : '';
+    const hasPerSourceKey = sources.value.some((s) => (s.apiKey || '').trim().length > 0);
+    if (legacyKey && !hasPerSourceKey) {
+      const idx = sources.value.findIndex((s) => s.id === activeSourceId.value);
+      if (idx >= 0) {
+        sources.value[idx] = { ...sources.value[idx], apiKey: legacyKey };
+        migratedLegacyKeyToSource = true;
+      }
+    }
+    const activeSrc = sources.value.find((s) => s.id === activeSourceId.value);
+    apiKey.value = (activeSrc?.apiKey || '').trim() || legacyKey;
   } catch {
     // Keep defaults if backend state is not available.
   } finally {
     aiConfigLoaded.value = true;
+    if (migratedLegacyKeyToSource) scheduleSaveAiConfig();
   }
 };
 
@@ -346,31 +364,55 @@ const scheduleSaveAiConfig = () => {
     window.clearTimeout(saveAiConfigTimer);
   }
   saveAiConfigTimer = window.setTimeout(() => {
+    const sourcesPayload = sources.value.map((s) => ({
+      id: s.id,
+      name: s.name,
+      modelsUrl: s.modelsUrl,
+      chatBaseUrl: s.chatBaseUrl,
+      apiKey: s.id === activeSourceId.value ? apiKey.value.trim() : (s.apiKey || '').trim(),
+    }));
     void invoke('save_ai_config', {
       config: {
         baseUrl: apiBaseUrl.value.trim() || 'https://aihubmix.com/v1',
         apiKey: apiKey.value.trim(),
         model: model.value.trim() || 'gpt-4o-mini',
         activeSourceId: activeSourceId.value,
-        sources: sources.value,
+        sources: sourcesPayload,
       },
     });
     saveAiConfigTimer = null;
   }, 220);
 };
 
+const cancelSourceDraft = () => {
+  editingSourceId.value = '';
+  sourceDraft.value = { id: '', name: '', modelsUrl: '', chatBaseUrl: '', apiKey: '' };
+  sourceApiKeyVisible.value = false;
+};
+
 const applyActiveSource = (id: string) => {
+  const prevIdx = sources.value.findIndex((s) => s.id === activeSourceId.value);
+  if (prevIdx >= 0) {
+    sources.value[prevIdx] = { ...sources.value[prevIdx], apiKey: apiKey.value.trim() };
+  }
   const src = sources.value.find((s) => s.id === id);
   if (!src) return;
   activeSourceId.value = src.id;
   apiBaseUrl.value = src.chatBaseUrl;
+  apiKey.value = (src.apiKey || '').trim();
+  cancelSourceDraft();
   void loadModelOptions();
+  scheduleSaveAiConfig();
 };
 
 const startEditSource = (source?: AiSourceItem) => {
+  sourceApiKeyVisible.value = false;
   if (source) {
     editingSourceId.value = source.id;
-    sourceDraft.value = { ...source };
+    sourceDraft.value = {
+      ...source,
+      apiKey: source.apiKey ?? '',
+    };
     return;
   }
   editingSourceId.value = '';
@@ -379,18 +421,21 @@ const startEditSource = (source?: AiSourceItem) => {
     name: '',
     modelsUrl: '',
     chatBaseUrl: '',
+    apiKey: '',
   };
 };
 
 const saveSourceDraft = () => {
+  const idx = sources.value.findIndex((s) => s.id === editingSourceId.value);
+  const prevKey = idx >= 0 ? (sources.value[idx].apiKey || '').trim() : '';
   const next = {
     id: sourceDraft.value.id.trim() || `source-${Date.now()}`,
     name: sourceDraft.value.name.trim(),
     modelsUrl: sourceDraft.value.modelsUrl.trim(),
     chatBaseUrl: sourceDraft.value.chatBaseUrl.trim(),
+    apiKey: (sourceDraft.value.apiKey ?? prevKey).trim(),
   };
   if (!next.name || !next.modelsUrl || !next.chatBaseUrl) return;
-  const idx = sources.value.findIndex((s) => s.id === editingSourceId.value);
   if (idx >= 0) {
     sources.value[idx] = next;
   } else {
@@ -398,9 +443,11 @@ const saveSourceDraft = () => {
     sources.value = [...sources.value, next];
   }
   if (!sources.value.some((s) => s.id === activeSourceId.value)) activeSourceId.value = next.id;
-  if (activeSourceId.value === next.id) apiBaseUrl.value = next.chatBaseUrl;
-  editingSourceId.value = '';
-  sourceDraft.value = { id: '', name: '', modelsUrl: '', chatBaseUrl: '' };
+  if (activeSourceId.value === next.id) {
+    apiBaseUrl.value = next.chatBaseUrl;
+    apiKey.value = next.apiKey;
+  }
+  cancelSourceDraft();
   scheduleSaveAiConfig();
 };
 
@@ -1844,13 +1891,47 @@ watch(modelPicker, async (value) => {
                   </div>
                 </div>
               </div>
+              <small v-if="!sourceDraft.id" class="hint source-key-hint">Configure the API key with Add or Edit on each provider below.</small>
               <div v-if="sourceDraft.id" class="source-editor">
-                <input v-model="sourceDraft.name" type="text" placeholder="Source name">
-                <input v-model="sourceDraft.modelsUrl" type="text" placeholder="Models URL">
-                <input v-model="sourceDraft.chatBaseUrl" type="text" placeholder="Chat Base URL">
+                <label class="source-field">
+                  <span>Display name</span>
+                  <input v-model="sourceDraft.name" type="text" placeholder="e.g. OpenRouter, Aihubmix">
+                </label>
+                <label class="source-field">
+                  <span>Models list URL</span>
+                  <input
+                    v-model="sourceDraft.modelsUrl"
+                    type="text"
+                    placeholder="Used when you click Refresh to load model IDs"
+                  >
+                </label>
+                <label class="source-field">
+                  <span>Chat API base URL</span>
+                  <input
+                    v-model="sourceDraft.chatBaseUrl"
+                    type="text"
+                    placeholder="e.g. https://openrouter.ai/api/v1 or https://aihubmix.com/v1"
+                  >
+                </label>
+                <label class="source-field">
+                  <span>API key (this provider only)</span>
+                  <div class="model-row">
+                    <input
+                      v-model="sourceDraft.apiKey"
+                      :type="sourceApiKeyVisible ? 'text' : 'password'"
+                      placeholder="Paste the key from this provider’s dashboard"
+                      autocomplete="off"
+                      spellcheck="false"
+                    >
+                    <button type="button" class="mini-btn" @click="sourceApiKeyVisible = !sourceApiKeyVisible">
+                      {{ sourceApiKeyVisible ? 'Hide' : 'Show' }}
+                    </button>
+                  </div>
+                  <small class="hint">Each source has its own key; OpenRouter and Aihubmix keys are not interchangeable.</small>
+                </label>
                 <div class="source-actions">
-                  <button class="mini-btn" @click="saveSourceDraft">Save Source</button>
-                  <button class="mini-btn" @click="sourceDraft = { id: '', name: '', modelsUrl: '', chatBaseUrl: '' }">Cancel</button>
+                  <button type="button" class="mini-btn" @click="saveSourceDraft">Save Source</button>
+                  <button type="button" class="mini-btn" @click="cancelSourceDraft">Cancel</button>
                 </div>
               </div>
             </label>
@@ -1914,13 +1995,6 @@ watch(modelPicker, async (value) => {
                 </button>
               </div>
               <small v-if="modelLoadError" class="hint error">{{ modelLoadError }}</small>
-            </label>
-            <label>
-              <span>API Key</span>
-              <div class="model-row">
-                <input v-model="apiKey" :type="apiKeyVisible ? 'text' : 'password'" placeholder="sk-...">
-                <button class="mini-btn" @click="apiKeyVisible = !apiKeyVisible">{{ apiKeyVisible ? 'Hide' : 'Show' }}</button>
-              </div>
             </label>
             <label class="check">
               <input v-model="autoContext" type="checkbox">
@@ -2717,6 +2791,11 @@ watch(modelPicker, async (value) => {
         padding: 0 10px;
       }
     }
+    .source-key-hint {
+      display: block;
+      margin-top: 2px;
+      line-height: 1.35;
+    }
     .source-list {
       display: grid;
       gap: 6px;
@@ -2751,8 +2830,16 @@ watch(modelPicker, async (value) => {
     }
     .source-editor {
       margin-top: 6px;
+      padding: 8px;
+      border: 1px solid color-mix(in srgb, var(--ide-border) 80%, transparent);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--ide-bg-main) 70%, transparent);
       display: grid;
-      gap: 6px;
+      gap: 8px;
+      .source-field .hint {
+        margin-top: 2px;
+        line-height: 1.35;
+      }
     }
     .hint {
       font-size: 11px;

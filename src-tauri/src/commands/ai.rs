@@ -64,22 +64,8 @@ const AI_FREE_FALLBACK_LIMIT: usize = 3;
 const AI_FREE_429_RETRY_MAX: usize = 2;
 
 fn load_ai_config(app: &tauri::AppHandle) -> Result<(String, String), String> {
-    let db = open_state_db(app)?;
-    let read_txn = db.begin_read().map_err(|e| e.to_string())?;
-    let table = read_txn.open_table(APP_KV).map_err(|e| e.to_string())?;
-
-    let base_url = table
-        .get("ai_base_url")
-        .map_err(|e| e.to_string())?
-        .map(|v| v.value().to_string())
-        .unwrap_or_else(|| "https://aihubmix.com/v1".to_string());
-    let api_key = table
-        .get("ai_api_key")
-        .map_err(|e| e.to_string())?
-        .map(|v| v.value().to_string())
-        .unwrap_or_default();
-
-    Ok((base_url, api_key))
+    let c = crate::commands::state::load_ai_config_data(app)?;
+    Ok((c.base_url, c.api_key))
 }
 
 fn save_ai_model(app: &tauri::AppHandle, model: &str) -> Result<(), String> {
@@ -128,6 +114,20 @@ fn is_http_429_error(err: &str) -> bool {
     err.contains("HTTP 429")
 }
 
+fn format_upstream_http_error(status: reqwest::StatusCode, body: &str) -> String {
+    let mut msg = if body.trim().is_empty() {
+        format!("Upstream error: HTTP {status}")
+    } else {
+        format!("Upstream error: HTTP {status} - {body}")
+    };
+    if status.as_u16() == 401 {
+        msg.push_str(
+            " Hint: use the API key from the same provider as the active AI source (OpenRouter vs Aihubmix keys are not interchangeable).",
+        );
+    }
+    msg
+}
+
 async fn call_chat_once(
     client: &reqwest::Client,
     endpoint: &str,
@@ -156,11 +156,7 @@ async fn call_chat_once(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(if body.trim().is_empty() {
-            format!("Upstream error: HTTP {status}")
-        } else {
-            format!("Upstream error: HTTP {status} - {body}")
-        });
+        return Err(format_upstream_http_error(status, &body));
     }
 
     let parsed: ChatCompletionResponse = response
@@ -250,11 +246,7 @@ async fn call_chat_once_stream(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(if body.trim().is_empty() {
-            format!("Upstream error: HTTP {status}")
-        } else {
-            format!("Upstream error: HTTP {status} - {body}")
-        });
+        return Err(format_upstream_http_error(status, &body));
     }
 
     let mut stream = response.bytes_stream();

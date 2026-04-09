@@ -36,6 +36,9 @@ pub struct AiSourceConfig {
     pub name: String,
     pub models_url: String,
     pub chat_base_url: String,
+    /// Per-provider key; when non-empty, used instead of the global `ai_api_key` for this source.
+    #[serde(default)]
+    pub api_key: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -107,9 +110,8 @@ pub fn save_app_state(app: tauri::AppHandle, state: AppState) -> Result<(), Stri
     Ok(())
 }
 
-#[tauri::command]
-pub fn load_ai_config(app: tauri::AppHandle) -> Result<AiConfig, String> {
-    let db = open_state_db(&app)?;
+fn read_ai_config_merged(app: &tauri::AppHandle) -> Result<AiConfig, String> {
+    let db = open_state_db(app)?;
     let read_txn = db.begin_read().map_err(|e| e.to_string())?;
     let table = read_txn.open_table(APP_KV).map_err(|e| e.to_string())?;
 
@@ -146,23 +148,46 @@ pub fn load_ai_config(app: tauri::AppHandle) -> Result<AiConfig, String> {
                     models_url: "https://openrouter.ai/api/v1/models?output_modalities=all"
                         .to_string(),
                     chat_base_url: "https://openrouter.ai/api/v1".to_string(),
+                    api_key: String::new(),
                 },
                 AiSourceConfig {
                     id: "aihubmix".to_string(),
                     name: "Aihubmix".to_string(),
                     models_url: "https://aihubmix.com/api/v1/models".to_string(),
                     chat_base_url: "https://aihubmix.com/v1".to_string(),
+                    api_key: String::new(),
                 },
             ]
         });
 
-    Ok(AiConfig {
+    let mut config = AiConfig {
         base_url,
         api_key,
         model,
         active_source_id,
         sources,
-    })
+    };
+    if let Some(src) = config
+        .sources
+        .iter()
+        .find(|s| s.id == config.active_source_id)
+    {
+        let k = src.api_key.trim();
+        if !k.is_empty() {
+            config.api_key = k.to_string();
+        }
+    }
+    Ok(config)
+}
+
+#[tauri::command]
+pub fn load_ai_config(app: tauri::AppHandle) -> Result<AiConfig, String> {
+    read_ai_config_merged(&app)
+}
+
+/// For use from `commands::ai` (same merge rules as [load_ai_config]).
+pub(crate) fn load_ai_config_data(app: &tauri::AppHandle) -> Result<AiConfig, String> {
+    read_ai_config_merged(app)
 }
 
 #[tauri::command]
